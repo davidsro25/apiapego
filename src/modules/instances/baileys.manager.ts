@@ -1,12 +1,10 @@
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
-  makeInMemoryStore,
   fetchLatestBaileysVersion,
   WASocket,
   ConnectionState,
   WAMessage,
-  proto,
   AnyMessageContent,
   MiscMessageGenerationOptions,
 } from '@whiskeysockets/baileys'
@@ -41,7 +39,7 @@ export class BaileysManager {
 
     // Reconecta instâncias que existiam antes de reiniciar
     const existing = await query<{ id: string; name: string; status: string }>(
-      "SELECT id, name, status FROM instances WHERE status != 'disconnected'"
+      "SELECT id, name, status FROM instances WHERE status != 'disconnected' AND provider = 'baileys'"
     )
 
     for (const inst of existing) {
@@ -66,7 +64,7 @@ export class BaileysManager {
       auth: state,
       printQRInTerminal: false,
       logger: logger.child({ module: 'baileys', instance: instanceName }) as any,
-      browser: ['WhaAPI', 'Chrome', '1.0.0'],
+      browser: ['ApiApego', 'Chrome', '1.0.0'],
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
@@ -100,8 +98,8 @@ export class BaileysManager {
         )
 
         logger.info({ instanceName }, 'QR Code generated')
-        await WebSocketServer.broadcast(instanceId, { event: 'qr', qr })
-        await WebhookDispatcher.dispatch(instanceId, 'connection', { event: 'qr', qr })
+        WebSocketServer.broadcast(instanceId, { event: 'qr', qr })
+        WebhookDispatcher.dispatch(instanceId, 'connection', { event: 'qr', qr })
       }
 
       if (connection === 'open') {
@@ -116,8 +114,8 @@ export class BaileysManager {
         )
 
         logger.info({ instanceName, phone }, 'WhatsApp connected')
-        await WebSocketServer.broadcast(instanceId, { event: 'connection', status: 'connected', phone })
-        await WebhookDispatcher.dispatch(instanceId, 'connection', { event: 'connected', phone, profileName })
+        WebSocketServer.broadcast(instanceId, { event: 'connection', status: 'connected', phone })
+        WebhookDispatcher.dispatch(instanceId, 'connection', { event: 'connected', phone, profileName })
       }
 
       if (connection === 'close') {
@@ -131,8 +129,8 @@ export class BaileysManager {
           [instanceId, shouldReconnect ? 'connecting' : 'disconnected']
         )
 
-        await WebSocketServer.broadcast(instanceId, { event: 'connection', status: 'disconnected', reason })
-        await WebhookDispatcher.dispatch(instanceId, 'connection', { event: 'disconnected', reason })
+        WebSocketServer.broadcast(instanceId, { event: 'connection', status: 'disconnected', reason })
+        WebhookDispatcher.dispatch(instanceId, 'connection', { event: 'disconnected', reason })
 
         if (shouldReconnect && (inst?.retryCount || 0) < 5) {
           const retryDelay = Math.min(5000 * Math.pow(2, inst?.retryCount || 0), 60000)
@@ -164,30 +162,25 @@ export class BaileysManager {
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return
 
-      const instanceData = await queryOne<{ settings: any; webhook_url: string }>(
-        'SELECT settings, webhook_url FROM instances WHERE id = $1',
+      const instanceData = await queryOne<{ settings: Record<string, boolean> }>(
+        'SELECT settings FROM instances WHERE id = $1',
         [instanceId]
       )
       const settings = instanceData?.settings || {}
 
       for (const msg of messages) {
         if (!msg.message) continue
-
-        // Ignora grupos se configurado
         if (settings.ignoreGroups && msg.key.remoteJid?.endsWith('@g.us')) continue
 
-        // Salva mensagem no banco
         await this.saveMessage(instanceId, msg)
 
-        // Marca como lida se configurado
         if (settings.readMessages && !msg.key.fromMe) {
           await sock.readMessages([msg.key])
         }
 
         const payload = this.formatMessage(msg)
-
-        await WebSocketServer.broadcast(instanceId, { event: 'message', data: payload })
-        await WebhookDispatcher.dispatch(instanceId, 'messages', { event: 'received', message: payload })
+        WebSocketServer.broadcast(instanceId, { event: 'message', data: payload })
+        WebhookDispatcher.dispatch(instanceId, 'messages', { event: 'received', message: payload })
       }
     })
 
@@ -197,8 +190,8 @@ export class BaileysManager {
     sock.ev.on('messages.update', async (updates) => {
       for (const update of updates) {
         const payload = { messageId: update.key.id, status: update.update.status }
-        await WebSocketServer.broadcast(instanceId, { event: 'message_status', data: payload })
-        await WebhookDispatcher.dispatch(instanceId, 'status', payload)
+        WebSocketServer.broadcast(instanceId, { event: 'message_status', data: payload })
+        WebhookDispatcher.dispatch(instanceId, 'status', payload)
       }
     })
   }
@@ -215,9 +208,7 @@ export class BaileysManager {
     const inst = instances.get(instanceId)
     if (!inst?.socket) throw new Error('Instance not connected')
     if (inst.status !== 'connected') throw new Error(`Instance status: ${inst.status}`)
-
-    const result = await inst.socket.sendMessage(jid, content, options)
-    return result
+    return inst.socket.sendMessage(jid, content, options)
   }
 
   // ============================================
@@ -226,9 +217,9 @@ export class BaileysManager {
   static async checkNumber(instanceId: string, jid: string): Promise<boolean> {
     const inst = instances.get(instanceId)
     if (!inst?.socket) throw new Error('Instance not connected')
-
-    const [result] = await inst.socket.onWhatsApp(jid)
-    return result?.exists || false
+    const results = await inst.socket.onWhatsApp(jid)
+    const result = Array.isArray(results) ? results[0] : undefined
+    return (result as any)?.exists || false
   }
 
   // ============================================
@@ -251,12 +242,11 @@ export class BaileysManager {
   static async logout(instanceId: string, instanceName: string): Promise<void> {
     const inst = instances.get(instanceId)
     if (inst?.socket) {
-      await inst.socket.logout()
+      try { await inst.socket.logout() } catch {}
     }
 
     instances.delete(instanceId)
 
-    // Remove session files
     const sessionDir = path.join(this.sessionsDir, instanceName)
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true })
@@ -277,7 +267,7 @@ export class BaileysManager {
   }
 
   // ============================================
-  // GET SOCKET (for advanced operations)
+  // GET SOCKET
   // ============================================
   static getSocket(instanceId: string): WASocket | undefined {
     return instances.get(instanceId)?.socket
@@ -320,12 +310,12 @@ export class BaileysManager {
     if (m.documentMessage) return 'document'
     if (m.stickerMessage) return 'sticker'
     if (m.locationMessage) return 'location'
-    if (m.contactMessage) return 'contact'
+    if (m.contactMessage || m.contactsArrayMessage) return 'contact'
     if (m.reactionMessage) return 'reaction'
     return 'unknown'
   }
 
-  private static getMessageContent(msg: WAMessage): any {
+  private static getMessageContent(msg: WAMessage): Record<string, unknown> {
     const m = msg.message
     if (!m) return {}
     if (m.conversation) return { text: m.conversation }
@@ -335,7 +325,7 @@ export class BaileysManager {
     if (m.audioMessage) return { url: m.audioMessage.url, duration: m.audioMessage.seconds }
     if (m.documentMessage) return { filename: m.documentMessage.fileName, url: m.documentMessage.url }
     if (m.locationMessage) return { lat: m.locationMessage.degreesLatitude, lng: m.locationMessage.degreesLongitude }
-    return m
+    return {}
   }
 
   private static formatMessage(msg: WAMessage) {

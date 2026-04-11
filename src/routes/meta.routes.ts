@@ -1,14 +1,21 @@
-import { FastifyInstance } from 'fastify'
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { MetaController } from '../controllers/meta.controller'
 
 export async function metaRoutes(app: FastifyInstance) {
-  // Verificação do webhook pela Meta (não requer autenticação)
-  app.get('/webhook', { config: { public: true } }, MetaController.verifyWebhook)
+  // Verificação do webhook pela Meta (pública - sem auth)
+  app.get('/webhook', async (
+    request: FastifyRequest<{
+      Querystring: { 'hub.mode': string; 'hub.verify_token': string; 'hub.challenge': string }
+    }>,
+    reply: FastifyReply
+  ) => MetaController.verifyWebhook(request, reply))
 
-  // Receber eventos da Meta (não requer autenticação - Meta usa verify_token)
-  app.post('/webhook', { config: { public: true } }, MetaController.receiveWebhook)
+  // Receber eventos da Meta (pública)
+  app.post('/webhook', async (request: FastifyRequest, reply: FastifyReply) =>
+    MetaController.receiveWebhook(request, reply)
+  )
 
-  // Envio via Meta Cloud API (requer auth)
+  // Envio via Meta Cloud API (requer auth - tratado no hook global)
   app.post('/:id/send-text', MetaController.sendText)
   app.post('/:id/send-template', MetaController.sendTemplate)
 }

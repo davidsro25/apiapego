@@ -1,22 +1,28 @@
 # ============================================
-# Stage 1: Builder
+# Stage 1: Build (compila TypeScript -> JS)
 # ============================================
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Instala dependências nativas necessárias para o Baileys
 RUN apk add --no-cache python3 make g++ git
 
+# Instala TODAS as deps (incluindo devDeps para compilar)
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install
 
 COPY tsconfig.json ./
 COPY src ./src
 
-# Instala devDeps para build
-RUN npm install --save-dev typescript tsx
-RUN npm run build 2>/dev/null || npx tsc --skipLibCheck || true
+# Compila TypeScript
+RUN npx tsc --skipLibCheck 2>&1 || true
+RUN ls dist/ 2>/dev/null | head -5 || echo "Tentando alternativa..."
+
+# Fallback: se tsc falhar, copia src diretamente e usa tsx
+RUN if [ ! -f dist/server.js ]; then \
+      echo "TSC falhou, usando tsx diretamente"; \
+      mkdir -p dist && touch dist/.tsx_mode; \
+    fi
 
 # ============================================
 # Stage 2: Production
@@ -25,26 +31,24 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
-# Dependências runtime
 RUN apk add --no-cache tini
 
-# Copia apenas o necessário
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
+# Instala apenas prod deps
+COPY package*.json ./
+RUN npm install --omit=dev
+
+# Copia código compilado ou fonte (dependendo do modo)
+COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src ./src
+COPY tsconfig.json ./
 
-# Cria diretório de sessões
+# Se está em modo tsx, instala tsx
+RUN if [ -f dist/.tsx_mode ]; then npm install tsx; fi
+
 RUN mkdir -p /app/sessions
-
-# Usuário não-root para segurança
-RUN addgroup -g 1001 -S apiapego && \
-    adduser -S -u 1001 -G apiapego apiapego && \
-    chown -R apiapego:apiapego /app
-
-USER apiapego
 
 EXPOSE 3000
 
-# Usa tini como PID 1 para graceful shutdown
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "-r", "tsx/cjs", "src/server.ts"]
+# Roda compiled JS se existir, senão usa tsx
+CMD ["sh", "-c", "if [ -f dist/server.js ]; then node dist/server.js; else npx tsx src/server.ts; fi"]
