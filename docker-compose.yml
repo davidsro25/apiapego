@@ -1,0 +1,140 @@
+version: "3.9"
+
+services:
+  # ============================================
+  # ApiApego - WhatsApp API
+  # ============================================
+  apiapego:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: apiapego
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - GLOBAL_API_KEY=${GLOBAL_API_KEY:-whaapi-apego-2024-secret-key}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-whaapi}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-whaapi@Apego2024}
+      - POSTGRES_DB=${POSTGRES_DB:-whaapi}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STORAGE_TYPE=file
+      - SESSIONS_PATH=/app/sessions
+      - WEBHOOK_RETRY_ATTEMPTS=3
+      - WEBHOOK_RETRY_DELAY=1000
+      - RATE_LIMIT_MAX=100
+      - RATE_LIMIT_WINDOW=60000
+      - META_VERIFY_TOKEN=${META_VERIFY_TOKEN:-apego_meta_verify}
+      - META_APP_SECRET=${META_APP_SECRET:-}
+    volumes:
+      - sessions_data:/app/sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - apiapego_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # PostgreSQL
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: apiapego_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-whaapi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-whaapi@Apego2024}
+      POSTGRES_DB: ${POSTGRES_DB:-whaapi}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - apiapego_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whaapi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ============================================
+  # Redis
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: apiapego_redis
+    restart: always
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - apiapego_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # Nginx Reverse Proxy
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: apiapego_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - apiapego
+    networks:
+      - apiapego_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  sessions_data:
+    driver: local
+  nginx_logs:
+    driver: local
+
+networks:
+  apiapego_net:
+    driver: bridge
