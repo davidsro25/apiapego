@@ -9,7 +9,7 @@ const TAG = ['API Keys']
 
 export async function keysRoutes(app: FastifyInstance) {
   app.get('/', {
-    schema: { tags: TAG, summary: 'Listar API keys', response: { 200: { type: 'object' } } },
+    schema: { tags: TAG, summary: 'Listar API keys' },
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     const keys = await query('SELECT id, name, active, created_at FROM api_keys ORDER BY created_at DESC')
     return reply.send({ success: true, data: keys })

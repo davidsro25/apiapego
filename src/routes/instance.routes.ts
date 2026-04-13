@@ -12,7 +12,7 @@ const instanceIdParam = {
 
 export async function instanceRoutes(app: FastifyInstance) {
   app.get('/', {
-    schema: { tags: TAG, summary: 'Listar instâncias', response: { 200: { type: 'object' } } },
+    schema: { tags: TAG, summary: 'Listar instâncias' },
   }, InstanceController.list)
 
   app.post('/', {

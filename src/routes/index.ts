@@ -1,3 +1,4 @@
+import { qrPageRoutes } from "./qr-page.routes"
 import { FastifyInstance } from 'fastify'
 import { authMiddleware } from '../middlewares/auth'
 import { instanceRoutes } from './instance.routes'
@@ -31,12 +32,13 @@ export async function registerRoutes(app: FastifyInstance) {
   }))
 
   app.addHook('preHandler', async (request, reply) => {
-    const publicPaths = ['/health', '/api/meta/webhook', '/docs']
+    const publicPaths = ['/health', '/api/meta/webhook', '/docs', '/qr']
     if (publicPaths.some((p) => request.url === p || request.url.startsWith(p + '/') || request.url.startsWith(p + '?'))) return
     if (request.url === '/docs') return
     await authMiddleware(request, reply)
   })
 
+  app.register(qrPageRoutes, { prefix: "/" })
   app.register(instanceRoutes, { prefix: '/api/instances' })
   app.register(messageRoutes, { prefix: '/api/instances' })
   app.register(metaRoutes, { prefix: '/api/meta' })
