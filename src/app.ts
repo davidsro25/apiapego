@@ -7,7 +7,9 @@ import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import { config } from './config'
 import { errorHandler } from './middlewares/error'
-import { registerRoutes } from './routes'
+import { registerRoutes } from "./routes"
+import { InstanceService } from "./services/instance.service"
+import QRCode from "qrcode"
 
 export async function buildApp() {
   const app = Fastify({
@@ -94,6 +96,25 @@ export async function buildApp() {
   await app.register(websocket)
 
   app.setErrorHandler(errorHandler)
+
+
+  // ============================================
+  // QR PAGE — rota pública, fora do scope de auth
+  // ============================================
+  app.get("/qr/:id", { schema: { hide: true } }, async (request: any, reply: any) => {
+    const instance = await InstanceService.get(request.params.id)
+    if (!instance) return reply.status(404).type("text/html").send("<h2>Instância não encontrada</h2>")
+    const { qr, status } = await InstanceService.getQr(request.params.id)
+    if (status === "connected") {
+      return reply.type("text/html").send()
+    }
+    if (!qr) {
+      return reply.type("text/html").send()
+    }
+    const qrDataUrl = await QRCode.toDataURL(qr, { width: 300, margin: 2 })
+    return reply.type("text/html").send()
+  })
+
 
   await registerRoutes(app)
 

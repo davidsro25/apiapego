@@ -1,46 +1,21 @@
-import { qrPageRoutes } from "./qr-page.routes"
-import { FastifyInstance } from 'fastify'
-import { authMiddleware } from '../middlewares/auth'
-import { instanceRoutes } from './instance.routes'
-import { messageRoutes } from './message.routes'
-import { metaRoutes } from './meta.routes'
-import { keysRoutes } from './keys.routes'
+import { FastifyInstance } from "fastify"
+import { authMiddleware } from "../middlewares/auth"
+import { instanceRoutes } from "./instance.routes"
+import { messageRoutes } from "./message.routes"
+import { metaRoutes } from "./meta.routes"
+import { keysRoutes } from "./keys.routes"
 
 export async function registerRoutes(app: FastifyInstance) {
-  app.get('/health', {
-    schema: {
-      tags: ['Health'],
-      summary: 'Status da API',
-      security: [],
-      response: {
-        200: {
-          type: 'object',
-          properties: {
-            status: { type: 'string' },
-            service: { type: 'string' },
-            version: { type: 'string' },
-            timestamp: { type: 'string', format: 'date-time' },
-          },
-        },
-      },
-    },
-  }, async () => ({
-    status: 'ok',
-    service: 'apiapego',
-    version: '1.0.0',
-    timestamp: new Date().toISOString(),
-  }))
 
-  app.addHook('preHandler', async (request, reply) => {
-    const publicPaths = ['/health', '/api/meta/webhook', '/docs', '/qr']
-    if (publicPaths.some((p) => request.url === p || request.url.startsWith(p + '/') || request.url.startsWith(p + '?'))) return
-    if (request.url === '/docs') return
+  app.addHook("preHandler", async (request: any, reply: any) => {
+    const url = (request.url || "").split("?")[0]
+    const publicPaths = ["/health", "/api/meta/webhook", "/docs", "/qr"]
+    if (publicPaths.some((p: string) => url === p || url.startsWith(p + "/"))) return
     await authMiddleware(request, reply)
   })
 
-  app.register(qrPageRoutes, { prefix: "/" })
-  app.register(instanceRoutes, { prefix: '/api/instances' })
-  app.register(messageRoutes, { prefix: '/api/instances' })
-  app.register(metaRoutes, { prefix: '/api/meta' })
-  app.register(keysRoutes, { prefix: '/api/keys' })
+  app.register(instanceRoutes, { prefix: "/api/instances" })
+  app.register(messageRoutes, { prefix: "/api/instances" })
+  app.register(metaRoutes, { prefix: "/api/meta" })
+  app.register(keysRoutes, { prefix: "/api/keys" })
 }
