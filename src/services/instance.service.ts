@@ -10,11 +10,13 @@ export interface Instance {
   api_key: string
   status: string
   webhook_url: string | null
+  webhook_enabled: boolean
   webhook_events: string[]
   settings: Record<string, any>
   phone: string | null
   profile_name: string | null
   provider: string
+  subscription_active: boolean
   created_at: Date
   updated_at: Date
 }
@@ -22,16 +24,19 @@ export interface Instance {
 export interface CreateInstanceDto {
   name: string
   webhookUrl?: string
+  webhookEnabled?: boolean
   webhookEvents?: string[]
   settings?: Record<string, any>
   provider?: 'baileys' | 'meta'
 }
 
-// Casting explícito para evitar "operator does not exist: character varying = uuid"
-const GET_BY_ID_OR_NAME = `
-  SELECT * FROM instances 
-  WHERE id::text = $1 OR name = $1
-`
+export interface UpdateWebhookDto {
+  url?: string
+  enabled?: boolean
+  events?: string[]
+}
+
+const GET_BY_ID_OR_NAME = `SELECT * FROM instances WHERE id::text = $1 OR name = $1`
 
 export class InstanceService {
   static async list(): Promise<Instance[]> {
@@ -53,12 +58,13 @@ export class InstanceService {
     const apiKey = `apego_${uuidv4().replace(/-/g, '')}`
     const events = dto.webhookEvents || ['messages', 'status', 'connection']
     const settings = dto.settings || {}
+    const webhookEnabled = dto.webhookEnabled !== false
 
     const [instance] = await query<Instance>(
-      `INSERT INTO instances (id, name, api_key, webhook_url, webhook_events, settings, provider)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO instances (id, name, api_key, webhook_url, webhook_enabled, webhook_events, settings, provider)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [id, dto.name, apiKey, dto.webhookUrl || null, events, JSON.stringify(settings), dto.provider || 'baileys']
+      [id, dto.name, apiKey, dto.webhookUrl || null, webhookEnabled, events, JSON.stringify(settings), dto.provider || 'baileys']
     )
 
     if (dto.provider !== 'meta') {
@@ -97,18 +103,18 @@ export class InstanceService {
     logger.info({ name: instance.name }, 'Instance restarted')
   }
 
-  static async updateWebhook(
-    idOrName: string,
-    webhookUrl: string,
-    events?: string[]
-  ): Promise<Instance> {
+  static async updateWebhook(idOrName: string, dto: UpdateWebhookDto): Promise<Instance> {
     const instance = await this.get(idOrName)
     if (!instance) throw new Error('Instance not found')
 
+    const url = dto.url !== undefined ? dto.url : instance.webhook_url
+    const enabled = dto.enabled !== undefined ? dto.enabled : instance.webhook_enabled
+    const events = dto.events || instance.webhook_events
+
     const [updated] = await query<Instance>(
-      `UPDATE instances SET webhook_url = $2, webhook_events = $3, updated_at = NOW()
+      `UPDATE instances SET webhook_url = $2, webhook_enabled = $3, webhook_events = $4, updated_at = NOW()
        WHERE id::text = $1 RETURNING *`,
-      [instance.id, webhookUrl, events || instance.webhook_events]
+      [instance.id, url, enabled, events]
     )
     return updated
   }
@@ -121,6 +127,17 @@ export class InstanceService {
     const [updated] = await query<Instance>(
       `UPDATE instances SET settings = $2, updated_at = NOW() WHERE id::text = $1 RETURNING *`,
       [instance.id, JSON.stringify(merged)]
+    )
+    return updated
+  }
+
+  static async updateSubscription(idOrName: string, active: boolean): Promise<Instance> {
+    const instance = await this.get(idOrName)
+    if (!instance) throw new Error('Instance not found')
+
+    const [updated] = await query<Instance>(
+      `UPDATE instances SET subscription_active = $2, updated_at = NOW() WHERE id::text = $1 RETURNING *`,
+      [instance.id, active]
     )
     return updated
   }

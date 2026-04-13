@@ -26,7 +26,6 @@ export interface InstanceInfo {
   retryCount: number
 }
 
-// Mapa em memória de instâncias ativas
 const instances = new Map<string, InstanceInfo>()
 
 export class BaileysManager {
@@ -37,7 +36,6 @@ export class BaileysManager {
       fs.mkdirSync(this.sessionsDir, { recursive: true })
     }
 
-    // Reconecta instâncias que existiam antes de reiniciar
     const existing = await query<{ id: string; name: string; status: string }>(
       "SELECT id, name, status FROM instances WHERE status != 'disconnected' AND provider = 'baileys'"
     )
@@ -92,14 +90,11 @@ export class BaileysManager {
         inst.status = 'qr'
         instances.set(instanceId, inst)
 
-        await query(
-          "UPDATE instances SET status = 'qr', updated_at = NOW() WHERE id = $1",
-          [instanceId]
-        )
+        await query("UPDATE instances SET status = 'qr', updated_at = NOW() WHERE id = $1", [instanceId])
 
         logger.info({ instanceName }, 'QR Code generated')
         WebSocketServer.broadcast(instanceId, { event: 'qr', qr })
-        WebhookDispatcher.dispatch(instanceId, 'connection', { event: 'qr', qr })
+        WebhookDispatcher.dispatch(instanceId, 'qr', { event: 'qr', qr })
       }
 
       if (connection === 'open') {
@@ -113,8 +108,16 @@ export class BaileysManager {
           [instanceId, phone, profileName]
         )
 
+        const instData = await queryOne<{ settings: Record<string, any> }>(
+          'SELECT settings FROM instances WHERE id = $1', [instanceId]
+        )
+        const settings = instData?.settings || {}
+        if (settings.alwaysOnline) {
+          await sock.sendPresenceUpdate('available').catch(() => {})
+        }
+
         logger.info({ instanceName, phone }, 'WhatsApp connected')
-        WebSocketServer.broadcast(instanceId, { event: 'connection', status: 'connected', phone })
+        WebSocketServer.broadcast(instanceId, { event: 'connection', status: 'connected', phone, profileName })
         WebhookDispatcher.dispatch(instanceId, 'connection', { event: 'connected', phone, profileName })
       }
 
@@ -157,25 +160,25 @@ export class BaileysManager {
     sock.ev.on('creds.update', saveCreds)
 
     // ============================================
-    // EVENT: Messages
+    // EVENT: Messages Received
     // ============================================
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       if (type !== 'notify') return
 
       const instanceData = await queryOne<{ settings: Record<string, boolean> }>(
-        'SELECT settings FROM instances WHERE id = $1',
-        [instanceId]
+        'SELECT settings FROM instances WHERE id = $1', [instanceId]
       )
       const settings = instanceData?.settings || {}
 
       for (const msg of messages) {
         if (!msg.message) continue
         if (settings.ignoreGroups && msg.key.remoteJid?.endsWith('@g.us')) continue
+        if (settings.ignoreChannels && msg.key.remoteJid?.includes('@newsletter')) continue
 
         await this.saveMessage(instanceId, msg)
 
         if (settings.readMessages && !msg.key.fromMe) {
-          await sock.readMessages([msg.key])
+          await sock.readMessages([msg.key]).catch(() => {})
         }
 
         const payload = this.formatMessage(msg)
@@ -189,10 +192,110 @@ export class BaileysManager {
     // ============================================
     sock.ev.on('messages.update', async (updates) => {
       for (const update of updates) {
-        const payload = { messageId: update.key.id, status: update.update.status }
+        const payload = { messageId: update.key.id, remoteJid: update.key.remoteJid, status: update.update.status }
         WebSocketServer.broadcast(instanceId, { event: 'message_status', data: payload })
         WebhookDispatcher.dispatch(instanceId, 'status', payload)
       }
+    })
+
+    // ============================================
+    // EVENT: Reactions
+    // ============================================
+    sock.ev.on('messages.reaction', async (reactions) => {
+      for (const reaction of reactions) {
+        const payload = {
+          messageId: reaction.key.id,
+          remoteJid: reaction.key.remoteJid,
+          reaction: reaction.reaction,
+        }
+        WebSocketServer.broadcast(instanceId, { event: 'reaction', data: payload })
+        WebhookDispatcher.dispatch(instanceId, 'reaction', payload)
+      }
+    })
+
+    // ============================================
+    // EVENT: Groups Update
+    // ============================================
+    sock.ev.on('groups.update', async (updates) => {
+      for (const update of updates) {
+        WebSocketServer.broadcast(instanceId, { event: 'group_update', data: update })
+        WebhookDispatcher.dispatch(instanceId, 'groups', { event: 'group_updated', data: update })
+      }
+    })
+
+    // ============================================
+    // EVENT: Group Participants
+    // ============================================
+    sock.ev.on('group-participants.update', async (update) => {
+      WebSocketServer.broadcast(instanceId, { event: 'group_participants', data: update })
+      WebhookDispatcher.dispatch(instanceId, 'groups', { event: 'participants_update', data: update })
+    })
+
+    // ============================================
+    // EVENT: Contacts Update
+    // ============================================
+    sock.ev.on('contacts.update', async (contacts) => {
+      for (const contact of contacts) {
+        WebSocketServer.broadcast(instanceId, { event: 'contact_update', data: contact })
+        WebhookDispatcher.dispatch(instanceId, 'contacts', { event: 'contact_updated', data: contact })
+      }
+    })
+
+    // ============================================
+    // EVENT: Presence Update
+    // ============================================
+    sock.ev.on('presence.update', async (presence) => {
+      WebSocketServer.broadcast(instanceId, { event: 'presence', data: presence })
+      WebhookDispatcher.dispatch(instanceId, 'presence', presence)
+    })
+
+    // ============================================
+    // EVENT: Calls
+    // ============================================
+    sock.ev.on('call', async (calls) => {
+      const instData = await queryOne<{ settings: Record<string, any> }>(
+        'SELECT settings FROM instances WHERE id = $1', [instanceId]
+      )
+      const settings = instData?.settings || {}
+
+      for (const call of calls) {
+        if (settings.rejectCalls && call.status === 'offer') {
+          try {
+            await sock.rejectCall(call.id, call.from)
+            if (settings.callRejectMessage) {
+              await sock.sendMessage(call.from, { text: settings.callRejectMessage })
+            }
+          } catch (err) {
+            logger.error({ err }, 'Failed to reject call')
+          }
+        }
+        const payload = { id: call.id, from: call.from, status: call.status, isVideo: call.isVideo }
+        WebSocketServer.broadcast(instanceId, { event: 'call', data: payload })
+        WebhookDispatcher.dispatch(instanceId, 'call', payload)
+      }
+    })
+
+    // ============================================
+    // EVENT: Chats Update
+    // ============================================
+    sock.ev.on('chats.update', async (updates) => {
+      for (const update of updates) {
+        WebSocketServer.broadcast(instanceId, { event: 'chat_update', data: update })
+        WebhookDispatcher.dispatch(instanceId, 'chats', { event: 'chat_updated', data: update })
+      }
+    })
+
+    // ============================================
+    // EVENT: Labels
+    // ============================================
+    sock.ev.on('labels.association', async (association) => {
+      WebSocketServer.broadcast(instanceId, { event: 'label_association', data: association })
+      WebhookDispatcher.dispatch(instanceId, 'labels', { event: 'label_association', data: association })
+    })
+
+    sock.ev.on('labels.edit', async (labels) => {
+      WebSocketServer.broadcast(instanceId, { event: 'label_edit', data: labels })
+      WebhookDispatcher.dispatch(instanceId, 'labels', { event: 'label_edit', data: labels })
     })
   }
 
@@ -220,6 +323,61 @@ export class BaileysManager {
     const results = await inst.socket.onWhatsApp(jid)
     const result = Array.isArray(results) ? results[0] : undefined
     return (result as any)?.exists || false
+  }
+
+  // ============================================
+  // GET GROUPS
+  // ============================================
+  static async getGroups(instanceId: string): Promise<any[]> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    const groups = await inst.socket.groupFetchAllParticipating()
+    return Object.values(groups).map((g: any) => ({
+      id: g.id,
+      subject: g.subject,
+      desc: g.desc,
+      owner: g.owner,
+      size: g.participants?.length || 0,
+      creation: g.creation,
+    }))
+  }
+
+  // ============================================
+  // GET GROUP PARTICIPANTS
+  // ============================================
+  static async getGroupParticipants(instanceId: string, groupId: string): Promise<any[]> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    const metadata = await inst.socket.groupMetadata(groupId)
+    return metadata.participants.map((p: any) => ({
+      id: p.id,
+      phone: p.id.replace('@s.whatsapp.net', '').replace('@g.us', ''),
+      isAdmin: p.admin === 'admin' || p.admin === 'superadmin',
+      isSuperAdmin: p.admin === 'superadmin',
+    }))
+  }
+
+  // ============================================
+  // GET LABELS
+  // ============================================
+  static async getLabels(instanceId: string): Promise<any[]> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    try {
+      const labels = await (inst.socket as any).getLabels?.()
+      return labels || []
+    } catch {
+      return []
+    }
+  }
+
+  // ============================================
+  // SEND PRESENCE
+  // ============================================
+  static async sendPresence(instanceId: string, jid: string, type: string): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    await inst.socket.sendPresenceUpdate(type as any, jid)
   }
 
   // ============================================
@@ -312,6 +470,9 @@ export class BaileysManager {
     if (m.locationMessage) return 'location'
     if (m.contactMessage || m.contactsArrayMessage) return 'contact'
     if (m.reactionMessage) return 'reaction'
+    if (m.pollCreationMessage) return 'poll'
+    if (m.listMessage) return 'list'
+    if (m.buttonsMessage) return 'buttons'
     return 'unknown'
   }
 
@@ -319,12 +480,13 @@ export class BaileysManager {
     const m = msg.message
     if (!m) return {}
     if (m.conversation) return { text: m.conversation }
-    if (m.extendedTextMessage) return { text: m.extendedTextMessage.text }
-    if (m.imageMessage) return { caption: m.imageMessage.caption, url: m.imageMessage.url }
+    if (m.extendedTextMessage) return { text: m.extendedTextMessage.text, contextInfo: m.extendedTextMessage.contextInfo }
+    if (m.imageMessage) return { caption: m.imageMessage.caption, url: m.imageMessage.url, mimetype: m.imageMessage.mimetype }
     if (m.videoMessage) return { caption: m.videoMessage.caption, url: m.videoMessage.url }
-    if (m.audioMessage) return { url: m.audioMessage.url, duration: m.audioMessage.seconds }
-    if (m.documentMessage) return { filename: m.documentMessage.fileName, url: m.documentMessage.url }
-    if (m.locationMessage) return { lat: m.locationMessage.degreesLatitude, lng: m.locationMessage.degreesLongitude }
+    if (m.audioMessage) return { url: m.audioMessage.url, duration: m.audioMessage.seconds, ptt: m.audioMessage.ptt }
+    if (m.documentMessage) return { filename: m.documentMessage.fileName, url: m.documentMessage.url, mimetype: m.documentMessage.mimetype }
+    if (m.locationMessage) return { lat: m.locationMessage.degreesLatitude, lng: m.locationMessage.degreesLongitude, name: m.locationMessage.name }
+    if (m.reactionMessage) return { text: m.reactionMessage.text, key: m.reactionMessage.key }
     return {}
   }
 

@@ -9,7 +9,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.addHook("preHandler", async (request: any, reply: any) => {
     const url = (request.url || "").split("?")[0]
-    const publicPaths = ["/health", "/api/meta/webhook", "/docs", "/qr"]
+    const publicPaths = ["/health", "/api/meta/webhook", "/docs", "/qr", "/dashboard", "/dashboard/login"]
     if (publicPaths.some((p: string) => url === p || url.startsWith(p + "/"))) return
     await authMiddleware(request, reply)
   })

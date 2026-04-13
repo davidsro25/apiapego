@@ -1,10 +1,8 @@
 import { FastifyInstance } from 'fastify'
 import QRCode from 'qrcode'
-import { InstanceController } from '../controllers/instance.controller'
 import { InstanceService } from '../services/instance.service'
 
 export async function qrPageRoutes(app: FastifyInstance) {
-  // GET /qr/:id — página HTML com QR Code para escanear
   app.get('/qr/:id', {
     schema: { hide: true },
     config: { skipAuth: true }
@@ -19,11 +17,14 @@ export async function qrPageRoutes(app: FastifyInstance) {
         <!DOCTYPE html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
         <title>ApiApego — Conectado</title>
-        <style>body{background:#0a0f1e;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;flex-direction:column;gap:16px}</style>
+        <style>body{background:#0a0f1e;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;flex-direction:column;gap:16px;text-align:center}</style>
         </head><body>
         <div style="font-size:64px">✅</div>
         <h2>WhatsApp Conectado!</h2>
         <p style="color:#22c55e;font-size:18px">Instância: <strong>${instance.name}</strong></p>
+        <p style="color:#6b7280;font-size:14px">Esta janela pode ser fechada.</p>
+        <button onclick="window.close()" style="margin-top:8px;background:#374151;border:none;border-radius:8px;padding:10px 24px;color:#fff;font-size:14px;cursor:pointer">Fechar</button>
+        <script>setTimeout(function(){ try { window.close() } catch(e){} }, 3000);</script>
         </body></html>
       `)
     }
@@ -32,13 +33,13 @@ export async function qrPageRoutes(app: FastifyInstance) {
       return reply.type('text/html').send(`
         <!DOCTYPE html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
-        <meta http-equiv="refresh" content="3">
         <title>ApiApego — Aguardando QR</title>
-        <style>body{background:#0a0f1e;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;flex-direction:column;gap:16px}</style>
+        <style>body{background:#0a0f1e;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;flex-direction:column;gap:16px;text-align:center}</style>
         </head><body>
         <div style="font-size:48px">⏳</div>
         <h2>Gerando QR Code...</h2>
-        <p style="color:#9ca3af">Atualizando em 3 segundos</p>
+        <p style="color:#9ca3af">Atualizando automaticamente...</p>
+        <script>setTimeout(function(){location.reload()},3000);</script>
         </body></html>
       `)
     }
@@ -52,7 +53,6 @@ export async function qrPageRoutes(app: FastifyInstance) {
     return reply.type('text/html').send(`
       <!DOCTYPE html><html><head><meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
-      <meta http-equiv="refresh" content="20">
       <title>ApiApego — Conectar WhatsApp</title>
       <style>
         body{background:#0a0f1e;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;flex-direction:column;gap:16px;text-align:center;padding:20px;box-sizing:border-box}
@@ -68,8 +68,28 @@ export async function qrPageRoutes(app: FastifyInstance) {
         <p class="inst">${instance.name}</p>
         <img src="${qrDataUrl}" width="280" height="280" alt="QR Code">
         <div class="badge">Abra o WhatsApp → Dispositivos conectados → Conectar dispositivo → Escaneie</div>
-        <p style="color:#6b7280;font-size:12px;margin-top:16px">QR atualiza automaticamente a cada 20s</p>
+        <p id="timer" style="color:#6b7280;font-size:12px;margin-top:16px"></p>
       </div>
+      <script>
+        var countdown = 20;
+        function tick(){
+          if(countdown<=0){location.reload();return;}
+          document.getElementById('timer').textContent='QR expira em '+countdown+'s';
+          countdown--;setTimeout(tick,1000);
+        }
+        tick();
+        // Verifica conexão a cada 3s sem precisar de auth (usa endpoint público de status)
+        function checkConn(){
+          fetch('/api/instances/${instance.id}/status',{headers:{'x-api-key':'${process.env.GLOBAL_API_KEY||''}'}})
+            .then(function(r){return r.json();}).then(function(d){
+              if(d&&d.data&&d.data.status==='connected'){
+                document.querySelector('.card').innerHTML='<div style="font-size:64px">✅</div><h2 style="color:#22c55e;margin-top:12px">Conectado!</h2><p style="color:#6b7280;margin-top:8px">Fechando em 2s...</p>';
+                setTimeout(function(){try{window.close();}catch(e){}},2000);
+              }
+            }).catch(function(){});
+        }
+        setInterval(checkConn,3000);
+      </script>
       </body></html>
     `)
   })

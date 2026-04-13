@@ -12,21 +12,21 @@ export async function messageRoutes(app: FastifyInstance) {
   app.post('/:id/check-number', {
     schema: {
       tags: TAG, summary: 'Verificar número no WhatsApp', params: instanceIdParam,
-      body: { type: 'object', required: ['number'], properties: { number: { type: 'string', example: '5511999999999' } } },
+      body: { type: 'object', required: ['phone'], properties: { phone: { type: 'string', example: '5511999999999', description: 'Número com DDI' } } },
     },
   }, MessageController.checkNumber)
 
   app.get('/:id/messages', {
     schema: {
       tags: TAG, summary: 'Listar mensagens', params: instanceIdParam,
-      querystring: { type: 'object', properties: { limit: { type: 'integer', default: 50 }, offset: { type: 'integer', default: 0 } } },
+      querystring: { type: 'object', properties: { phone: { type: 'string' }, limit: { type: 'integer', default: 50 }, offset: { type: 'integer', default: 0 } } },
     },
   }, MessageController.listMessages)
 
   app.post('/:id/send-text', {
     schema: {
       tags: TAG, summary: 'Enviar texto', params: instanceIdParam,
-      body: { type: 'object', required: ['to', 'text'], properties: { ...toField, text: { type: 'string', example: 'Olá! Tudo bem?' } } },
+      body: { type: 'object', required: ['to', 'text'], properties: { ...toField, text: { type: 'string', example: 'Olá! Tudo bem?' }, quoted: { type: 'string', description: 'ID da mensagem para citar' } } },
     },
   }, MessageController.sendText)
 
@@ -47,14 +47,14 @@ export async function messageRoutes(app: FastifyInstance) {
   app.post('/:id/send-audio', {
     schema: {
       tags: TAG, summary: 'Enviar áudio', params: instanceIdParam,
-      body: { type: 'object', required: ['to', 'audio'], properties: { ...toField, audio: { type: 'string', description: 'URL ou base64' } } },
+      body: { type: 'object', required: ['to', 'audio'], properties: { ...toField, audio: { type: 'string', description: 'URL ou base64' }, ptt: { type: 'boolean', description: 'Enviar como PTT (nota de voz)', default: false } } },
     },
   }, MessageController.sendAudio)
 
   app.post('/:id/send-document', {
     schema: {
       tags: TAG, summary: 'Enviar documento', params: instanceIdParam,
-      body: { type: 'object', required: ['to', 'document'], properties: { ...toField, document: { type: 'string' }, filename: { type: 'string' }, mimetype: { type: 'string' } } },
+      body: { type: 'object', required: ['to', 'document', 'filename'], properties: { ...toField, document: { type: 'string' }, filename: { type: 'string' }, mimetype: { type: 'string' } } },
     },
   }, MessageController.sendDocument)
 
@@ -81,7 +81,7 @@ export async function messageRoutes(app: FastifyInstance) {
 
   app.post('/:id/send-reaction', {
     schema: {
-      tags: TAG, summary: 'Enviar reação', params: instanceIdParam,
+      tags: TAG, summary: 'Enviar reação (emoji)', params: instanceIdParam,
       body: { type: 'object', required: ['to', 'messageId', 'emoji'], properties: { ...toField, messageId: { type: 'string' }, emoji: { type: 'string', example: '👍' } } },
     },
   }, MessageController.sendReaction)

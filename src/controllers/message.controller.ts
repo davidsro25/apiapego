@@ -3,52 +3,53 @@ import { z } from 'zod'
 import { MessageService } from '../services/message.service'
 import { InstanceService } from '../services/instance.service'
 
-// Schemas de validação
-const phoneBase = z.object({
-  phone: z.string().min(8),
+// Campo destino: 'to' em todos os envios, 'phone' no check
+const toBase = z.object({
+  to: z.string().min(8),
 })
 
-const textSchema = phoneBase.extend({
+const textSchema = toBase.extend({
   text: z.string().min(1).max(4096),
+  quoted: z.string().optional(),
 })
 
-const imageSchema = phoneBase.extend({
-  image: z.string().min(1), // URL ou base64
+const imageSchema = toBase.extend({
+  image: z.string().min(1),
   caption: z.string().optional(),
 })
 
-const videoSchema = phoneBase.extend({
-  video: z.string().url(),
+const videoSchema = toBase.extend({
+  video: z.string().min(1),
   caption: z.string().optional(),
 })
 
-const audioSchema = phoneBase.extend({
-  audio: z.string().url(),
+const audioSchema = toBase.extend({
+  audio: z.string().min(1),
   ptt: z.boolean().optional().default(false),
 })
 
-const documentSchema = phoneBase.extend({
-  document: z.string().url(),
+const documentSchema = toBase.extend({
+  document: z.string().min(1),
   filename: z.string(),
   mimetype: z.string().optional(),
 })
 
-const locationSchema = phoneBase.extend({
+const locationSchema = toBase.extend({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   name: z.string().optional(),
 })
 
-const contactSchema = phoneBase.extend({
+const contactSchema = toBase.extend({
   contactName: z.string().min(1),
   contactPhone: z.string().min(8),
 })
 
-const stickerSchema = phoneBase.extend({
-  sticker: z.string().url(),
+const stickerSchema = toBase.extend({
+  sticker: z.string().min(1),
 })
 
-const reactionSchema = phoneBase.extend({
+const reactionSchema = toBase.extend({
   messageId: z.string().min(1),
   emoji: z.string().min(1),
 })
@@ -67,65 +68,65 @@ async function getInstance(id: string) {
 
 export const MessageController = {
   async sendText(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, text } = textSchema.parse(request.body)
+    const { to, text, quoted } = textSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendText(inst.id, phone, text)
+    const result = await MessageService.sendText(inst.id, to, text)
     return reply.send(result)
   },
 
   async sendImage(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, image, caption } = imageSchema.parse(request.body)
+    const { to, image, caption } = imageSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendImage(inst.id, phone, image, caption)
+    const result = await MessageService.sendImage(inst.id, to, image, caption)
     return reply.send(result)
   },
 
   async sendVideo(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, video, caption } = videoSchema.parse(request.body)
+    const { to, video, caption } = videoSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendVideo(inst.id, phone, video, caption)
+    const result = await MessageService.sendVideo(inst.id, to, video, caption)
     return reply.send(result)
   },
 
   async sendAudio(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, audio, ptt } = audioSchema.parse(request.body)
+    const { to, audio, ptt } = audioSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendAudio(inst.id, phone, audio, ptt)
+    const result = await MessageService.sendAudio(inst.id, to, audio, ptt)
     return reply.send(result)
   },
 
   async sendDocument(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, document, filename, mimetype } = documentSchema.parse(request.body)
+    const { to, document, filename, mimetype } = documentSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendDocument(inst.id, phone, document, filename, mimetype)
+    const result = await MessageService.sendDocument(inst.id, to, document, filename, mimetype)
     return reply.send(result)
   },
 
   async sendLocation(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, latitude, longitude, name } = locationSchema.parse(request.body)
+    const { to, latitude, longitude, name } = locationSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendLocation(inst.id, phone, latitude, longitude, name)
+    const result = await MessageService.sendLocation(inst.id, to, latitude, longitude, name)
     return reply.send(result)
   },
 
   async sendContact(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, contactName, contactPhone } = contactSchema.parse(request.body)
+    const { to, contactName, contactPhone } = contactSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendContact(inst.id, phone, contactName, contactPhone)
+    const result = await MessageService.sendContact(inst.id, to, contactName, contactPhone)
     return reply.send(result)
   },
 
   async sendSticker(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, sticker } = stickerSchema.parse(request.body)
+    const { to, sticker } = stickerSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendSticker(inst.id, phone, sticker)
+    const result = await MessageService.sendSticker(inst.id, to, sticker)
     return reply.send(result)
   },
 
   async sendReaction(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
-    const { phone, messageId, emoji } = reactionSchema.parse(request.body)
+    const { to, messageId, emoji } = reactionSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
-    const result = await MessageService.sendReaction(inst.id, phone, messageId, emoji)
+    const result = await MessageService.sendReaction(inst.id, to, messageId, emoji)
     return reply.send(result)
   },
 
