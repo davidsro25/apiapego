@@ -6,32 +6,39 @@ import { metaRoutes } from './meta.routes'
 import { keysRoutes } from './keys.routes'
 
 export async function registerRoutes(app: FastifyInstance) {
-  // Health check público
-  app.get('/health', async () => ({
+  app.get('/health', {
+    schema: {
+      tags: ['Health'],
+      summary: 'Status da API',
+      security: [],
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            status: { type: 'string' },
+            service: { type: 'string' },
+            version: { type: 'string' },
+            timestamp: { type: 'string', format: 'date-time' },
+          },
+        },
+      },
+    },
+  }, async () => ({
     status: 'ok',
     service: 'apiapego',
     version: '1.0.0',
     timestamp: new Date().toISOString(),
   }))
 
-  // Rotas protegidas por API Key
   app.addHook('preHandler', async (request, reply) => {
-    // Rotas públicas: health check e webhooks Meta
-    const publicPaths = ['/health', '/api/meta/webhook']
-    if (publicPaths.some((p) => request.url === p || request.url.startsWith(p))) return
-
+    const publicPaths = ['/health', '/api/meta/webhook', '/docs']
+    if (publicPaths.some((p) => request.url === p || request.url.startsWith(p + '/') || request.url.startsWith(p + '?'))) return
+    if (request.url === '/docs') return
     await authMiddleware(request, reply)
   })
 
-  // Instâncias e WhatsApp (Baileys)
   app.register(instanceRoutes, { prefix: '/api/instances' })
-
-  // Mensagens (prefixo em /api/instances para manter compatibilidade com PAPI)
   app.register(messageRoutes, { prefix: '/api/instances' })
-
-  // Meta Cloud API
   app.register(metaRoutes, { prefix: '/api/meta' })
-
-  // Gerenciamento de API Keys
   app.register(keysRoutes, { prefix: '/api/keys' })
 }

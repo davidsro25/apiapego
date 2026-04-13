@@ -4,40 +4,83 @@ import { WebSocketServer } from '../modules/websocket/ws.server'
 import { BaileysManager } from '../modules/instances/baileys.manager'
 import { InstanceService } from '../services/instance.service'
 
+const TAG = ['Instances']
+const instanceIdParam = {
+  type: 'object',
+  properties: { id: { type: 'string', description: 'ID ou nome da instância' } },
+}
+
 export async function instanceRoutes(app: FastifyInstance) {
-  // Listar todas as instâncias
-  app.get('/', InstanceController.list)
+  app.get('/', {
+    schema: { tags: TAG, summary: 'Listar instâncias', response: { 200: { type: 'object' } } },
+  }, InstanceController.list)
 
-  // Criar instância
-  app.post('/', InstanceController.create)
+  app.post('/', {
+    schema: {
+      tags: TAG,
+      summary: 'Criar instância',
+      body: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', example: 'minha-instancia' },
+          webhookUrl: { type: 'string', example: 'https://meusite.com/webhook' },
+          settings: { type: 'object' },
+        },
+      },
+    },
+  }, InstanceController.create)
 
-  // Obter instância por ID ou nome
-  app.get('/:id', InstanceController.get)
+  app.get('/:id', {
+    schema: { tags: TAG, summary: 'Obter instância', params: instanceIdParam },
+  }, InstanceController.get)
 
-  // Status da instância
-  app.get('/:id/status', InstanceController.status)
+  app.get('/:id/status', {
+    schema: { tags: TAG, summary: 'Status da instância', params: instanceIdParam },
+  }, InstanceController.status)
 
-  // QR Code
-  app.get('/:id/qr', InstanceController.qr)
+  app.get('/:id/qr', {
+    schema: { tags: TAG, summary: 'QR Code para conectar', params: instanceIdParam },
+  }, InstanceController.qr)
 
-  // Deletar instância
-  app.delete('/:id', InstanceController.delete)
+  app.delete('/:id', {
+    schema: { tags: TAG, summary: 'Deletar instância', params: instanceIdParam },
+  }, InstanceController.delete)
 
-  // Logout (desconecta mas mantém instância)
-  app.post('/:id/logout', InstanceController.logout)
+  app.post('/:id/logout', {
+    schema: { tags: TAG, summary: 'Logout (desconecta, mantém instância)', params: instanceIdParam },
+  }, InstanceController.logout)
 
-  // Restart
-  app.post('/:id/restart', InstanceController.restart)
+  app.post('/:id/restart', {
+    schema: { tags: TAG, summary: 'Reiniciar instância', params: instanceIdParam },
+  }, InstanceController.restart)
 
-  // Webhook
-  app.get('/:id/webhook', InstanceController.getWebhook)
-  app.put('/:id/webhook', InstanceController.setWebhook)
+  app.get('/:id/webhook', {
+    schema: { tags: TAG, summary: 'Ver webhook configurado', params: instanceIdParam },
+  }, InstanceController.getWebhook)
 
-  // Settings
-  app.put('/:id/settings', InstanceController.updateSettings)
+  app.put('/:id/webhook', {
+    schema: {
+      tags: TAG,
+      summary: 'Configurar webhook',
+      params: instanceIdParam,
+      body: {
+        type: 'object',
+        properties: { url: { type: 'string' }, events: { type: 'array', items: { type: 'string' } } },
+      },
+    },
+  }, InstanceController.setWebhook)
 
-  // WebSocket - conexão em tempo real
-  app.get('/:id/ws', { websocket: true }, async (socket, request: any) => {
+  app.put('/:id/settings', {
+    schema: {
+      tags: TAG,
+      summary: 'Atualizar configurações',
+      params: instanceIdParam,
+      body: { type: 'object' },
+    },
+  }, InstanceController.updateSettings)
+
+  app.get('/:id/ws', { websocket: true, schema: { tags: TAG, summary: 'WebSocket tempo real', params: instanceIdParam } }, async (socket, request: any) => {
     const id = request.params.id
     const instance = await InstanceService.get(id)
     if (!instance) {
@@ -45,7 +88,6 @@ export async function instanceRoutes(app: FastifyInstance) {
       socket.close()
       return
     }
-
     WebSocketServer.register(instance.id, socket)
     socket.send(JSON.stringify({
       event: 'connected',
