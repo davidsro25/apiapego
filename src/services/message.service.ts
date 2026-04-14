@@ -56,7 +56,12 @@ export class MessageService {
       success: true,
       messageId: msg?.key?.id || '',
       remoteJid: msg?.key?.remoteJid || '',
-      timestamp: (msg?.messageTimestamp as number) || Math.floor(Date.now() / 1000),
+      timestamp: (() => {
+        const ts = msg?.messageTimestamp
+        if (ts == null) return Math.floor(Date.now() / 1000)
+        if (typeof ts === 'number') return ts
+        return typeof (ts as any).toNumber === 'function' ? (ts as any).toNumber() : Number(ts)
+      })(),
     }
   }
 

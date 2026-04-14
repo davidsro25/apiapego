@@ -2,6 +2,7 @@ import { FastifyRequest, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { MessageService } from '../services/message.service'
 import { InstanceService } from '../services/instance.service'
+import { BaileysManager } from '../modules/instances/baileys.manager'
 
 // Campo destino: 'to' em todos os envios, 'phone' no check
 const toBase = z.object({
@@ -122,11 +123,23 @@ const checkSchema = z.object({
   phone: z.string().min(8),
 })
 
-// Helper para pegar instanceId validado
+// Cache de instancias para evitar query DB a cada envio (TTL 30s)
+const instanceCache = new Map<string, { instance: any; cachedAt: number }>()
+const INSTANCE_CACHE_TTL = 30_000
+
+// Helper para pegar instanceId validado -- usa cache de 30s para evitar query DB a cada envio
 async function getInstance(id: string) {
+  const cached = instanceCache.get(id)
+  if (cached && Date.now() - cached.cachedAt < INSTANCE_CACHE_TTL) {
+    const liveStatus = BaileysManager.getStatus(cached.instance.id)
+    if (!liveStatus) throw new Error('Instance not found')
+    if (liveStatus !== 'connected') throw new Error(`Instance is ${liveStatus}`)
+    return cached.instance
+  }
   const instance = await InstanceService.get(id)
   if (!instance) throw new Error('Instance not found')
   if (instance.status !== 'connected') throw new Error(`Instance is ${instance.status}`)
+  instanceCache.set(id, { instance, cachedAt: Date.now() })
   return instance
 }
 

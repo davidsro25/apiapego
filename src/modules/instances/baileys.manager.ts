@@ -210,6 +210,19 @@ export class BaileysManager {
           }
         }
       }
+      // Mensagens enviadas via API chegam com type=append (fromMe=true)
+      if (type === 'append') {
+        for (const msg of messages) {
+          if (!msg.message || !msg.key.fromMe) continue
+          if (msg.key.remoteJid === 'status@broadcast') continue
+          await this.saveMessage(instanceId, msg)
+          const payload = this.formatMessage(msg)
+          WebSocketServer.broadcast(instanceId, { event: 'message_sent', data: payload })
+          WebhookDispatcher.dispatch(instanceId, 'messages', { event: 'sent', message: payload })
+        }
+        return
+      }
+
       if (type !== 'notify') return
 
       // Use cached settings to avoid DB query on every message event
@@ -541,7 +554,13 @@ export class BaileysManager {
   static async checkNumber(instanceId: string, jid: string): Promise<boolean> {
     const inst = instances.get(instanceId)
     if (!inst?.socket) throw new Error('Instance not connected')
-    const results = await inst.socket.onWhatsApp(jid)
+    const timeoutMs = 8000
+    const results = await Promise.race([
+      inst.socket.onWhatsApp(jid),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('checkNumber timeout')), timeoutMs)
+      ),
+    ])
     const result = Array.isArray(results) ? results[0] : undefined
     return (result as any)?.exists || false
   }
