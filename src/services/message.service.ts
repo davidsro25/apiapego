@@ -20,18 +20,35 @@ export class MessageService {
     const formatted = formatBrazilianPhone(phone)
     const jid = toJid(formatted)
 
-    // Tenta verificar se o numero existe — se falhar tecnicamente, envia mesmo assim
+    // Tenta verificar se o numero existe no WhatsApp
+    // Estrategia: tenta formato com 9 (novo padrao BR) e sem 9 (formato antigo BR)
     try {
       const exists = await BaileysManager.checkNumber(instanceId, jid)
-      if (!exists) throw new Error('Numero ' + phone + ' nao esta no WhatsApp')
+      if (exists) return jid
+
+      // Se nao encontrou no formato moderno, tenta o formato antigo (sem o 9 extra)
+      const digits = phone.replace(/\D/g, '')
+      const withCountry = digits.startsWith('55') ? digits : '55' + digits
+      if (withCountry.length === 13) {
+        // Remove o 9 extra: 55 + DDD(2) + 9 + 8 digitos -> 55 + DDD + 8 digitos
+        const jidOld = toJid('55' + withCountry.slice(2, 4) + withCountry.slice(5))
+        const existsOld = await BaileysManager.checkNumber(instanceId, jidOld)
+        if (existsOld) return jidOld
+      } else if (withCountry.length === 12) {
+        // Ja tentamos com 13 (com 9) acima, sem sucesso. Usa o 12 mesmo
+        const existsOld = await BaileysManager.checkNumber(instanceId, toJid(withCountry))
+        if (existsOld) return toJid(withCountry)
+      }
+
+      throw new Error('Numero ' + phone + ' nao esta no WhatsApp')
     } catch (err: any) {
       if (err.message?.includes('nao esta no WhatsApp') || err.message?.includes('not registered')) {
         throw err
       }
+      // Falha tecnica — ainda tenta enviar no formato moderno
       logger.warn({ phone, jid, errMsg: err.message }, 'checkNumber falhou, tentando enviar mesmo assim')
+      return jid
     }
-
-    return jid
   }
 
   private static buildResult(msg: proto.IWebMessageInfo | undefined): SendResult {
