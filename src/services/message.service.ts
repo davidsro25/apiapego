@@ -185,6 +185,111 @@ export class MessageService {
   }
 
   // ============================================
+  // BUTTONS
+  // ============================================
+  static async sendButtons(
+    instanceId: string,
+    phone: string,
+    text: string,
+    footer: string,
+    buttons: { id: string; text: string }[]
+  ): Promise<SendResult> {
+    const jid = await this.resolveJid(instanceId, phone)
+    const msg = await BaileysManager.sendButtons(instanceId, jid, text, footer, buttons)
+    return this.buildResult(msg)
+  }
+
+  // ============================================
+  // LIST
+  // ============================================
+  static async sendList(
+    instanceId: string,
+    phone: string,
+    title: string,
+    text: string,
+    footer: string,
+    buttonText: string,
+    sections: { title: string; rows: { id: string; title: string; description?: string }[] }[]
+  ): Promise<SendResult> {
+    const jid = await this.resolveJid(instanceId, phone)
+    const msg = await BaileysManager.sendList(instanceId, jid, title, text, footer, buttonText, sections)
+    return this.buildResult(msg)
+  }
+
+  // ============================================
+  // POLL
+  // ============================================
+  static async sendPoll(
+    instanceId: string,
+    phone: string,
+    name: string,
+    values: string[],
+    selectableCount?: number
+  ): Promise<SendResult> {
+    const jid = await this.resolveJid(instanceId, phone)
+    const msg = await BaileysManager.sendPoll(instanceId, jid, name, values, selectableCount)
+    return this.buildResult(msg)
+  }
+
+  // ============================================
+  // CAROUSEL
+  // ============================================
+  static async sendCarousel(
+    instanceId: string,
+    phone: string,
+    cards: {
+      title: string
+      body: string
+      footer?: string
+      image?: string
+      buttons: { id: string; text: string; url?: string }[]
+    }[]
+  ): Promise<SendResult> {
+    const jid = await this.resolveJid(instanceId, phone)
+    const msg = await BaileysManager.sendCarousel(instanceId, jid, cards)
+    return this.buildResult(msg)
+  }
+
+  // ============================================
+  // DELETE MESSAGE
+  // ============================================
+  static async deleteMessage(
+    instanceId: string,
+    phone: string,
+    messageId: string,
+    forEveryone: boolean = true
+  ): Promise<{ success: boolean }> {
+    const jid = phone.includes('@') ? phone : toJid(formatBrazilianPhone(phone))
+    await BaileysManager.deleteMessage(instanceId, jid, messageId, forEveryone)
+    return { success: true }
+  }
+
+  // ============================================
+  // EDIT MESSAGE
+  // ============================================
+  static async editMessage(
+    instanceId: string,
+    phone: string,
+    messageId: string,
+    text: string
+  ): Promise<SendResult> {
+    const jid = phone.includes('@') ? phone : toJid(formatBrazilianPhone(phone))
+    const msg = await BaileysManager.editMessage(instanceId, jid, messageId, text)
+    return this.buildResult(msg)
+  }
+
+  // ============================================
+  // READ MESSAGES
+  // ============================================
+  static async readMessages(
+    instanceId: string,
+    keys: { remoteJid: string; id: string; fromMe?: boolean }[]
+  ): Promise<{ success: boolean }> {
+    await BaileysManager.readMessages(instanceId, keys)
+    return { success: true }
+  }
+
+  // ============================================
   // CHECK NUMBER
   // ============================================
   static async checkNumber(instanceId: string, phone: string): Promise<{ exists: boolean; jid: string }> {

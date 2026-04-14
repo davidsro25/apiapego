@@ -18,6 +18,7 @@ const MIGRATIONS = [
     provider VARCHAR(20) DEFAULT 'baileys',
     subscription_active BOOLEAN DEFAULT true,
     proxy_url TEXT,
+    ws_events TEXT[] DEFAULT ARRAY['messages', 'connection', 'qr', 'presence', 'call'],
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )
@@ -51,6 +52,8 @@ const MIGRATIONS = [
   `ALTER TABLE instances ADD COLUMN IF NOT EXISTS webhook_enabled BOOLEAN DEFAULT true`,
   `ALTER TABLE instances ADD COLUMN IF NOT EXISTS subscription_active BOOLEAN DEFAULT true`,
   `ALTER TABLE instances ADD COLUMN IF NOT EXISTS proxy_url TEXT`,
+  // Colunas adicionadas na v3
+  `ALTER TABLE instances ADD COLUMN IF NOT EXISTS ws_events TEXT[] DEFAULT ARRAY['messages', 'connection', 'qr', 'presence', 'call']`,
 ]
 
 export async function runMigrations() {

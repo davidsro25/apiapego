@@ -12,11 +12,14 @@ export interface Instance {
   webhook_url: string | null
   webhook_enabled: boolean
   webhook_events: string[]
+  ws_events: string[]
   settings: Record<string, any>
   phone: string | null
   profile_name: string | null
+  profile_pic_url: string | null
   provider: string
   subscription_active: boolean
+  proxy_url: string | null
   created_at: Date
   updated_at: Date
 }
@@ -26,6 +29,7 @@ export interface CreateInstanceDto {
   webhookUrl?: string
   webhookEnabled?: boolean
   webhookEvents?: string[]
+  wsEvents?: string[]
   settings?: Record<string, any>
   provider?: 'baileys' | 'meta'
 }
@@ -57,14 +61,15 @@ export class InstanceService {
     const id = uuidv4()
     const apiKey = `apego_${uuidv4().replace(/-/g, '')}`
     const events = dto.webhookEvents || ['messages', 'status', 'connection']
+    const wsEvts = dto.wsEvents || ['messages', 'connection', 'qr', 'presence', 'call']
     const settings = dto.settings || {}
     const webhookEnabled = dto.webhookEnabled !== false
 
     const [instance] = await query<Instance>(
-      `INSERT INTO instances (id, name, api_key, webhook_url, webhook_enabled, webhook_events, settings, provider)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO instances (id, name, api_key, webhook_url, webhook_enabled, webhook_events, ws_events, settings, provider)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [id, dto.name, apiKey, dto.webhookUrl || null, webhookEnabled, events, JSON.stringify(settings), dto.provider || 'baileys']
+      [id, dto.name, apiKey, dto.webhookUrl || null, webhookEnabled, events, wsEvts, JSON.stringify(settings), dto.provider || 'baileys']
     )
 
     if (dto.provider !== 'meta') {
@@ -138,6 +143,28 @@ export class InstanceService {
     const [updated] = await query<Instance>(
       `UPDATE instances SET subscription_active = $2, updated_at = NOW() WHERE id::text = $1 RETURNING *`,
       [instance.id, active]
+    )
+    return updated
+  }
+
+  static async updateProxy(idOrName: string, proxyUrl: string | null): Promise<Instance> {
+    const instance = await this.get(idOrName)
+    if (!instance) throw new Error('Instance not found')
+
+    const [updated] = await query<Instance>(
+      `UPDATE instances SET proxy_url = $2, updated_at = NOW() WHERE id::text = $1 RETURNING *`,
+      [instance.id, proxyUrl]
+    )
+    return updated
+  }
+
+  static async updateWsConfig(idOrName: string, events: string[]): Promise<Instance> {
+    const instance = await this.get(idOrName)
+    if (!instance) throw new Error('Instance not found')
+
+    const [updated] = await query<Instance>(
+      `UPDATE instances SET ws_events = $2, updated_at = NOW() WHERE id::text = $1 RETURNING *`,
+      [instance.id, events]
     )
     return updated
   }

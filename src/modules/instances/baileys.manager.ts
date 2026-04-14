@@ -7,6 +7,7 @@ import makeWASocket, {
   WAMessage,
   AnyMessageContent,
   MiscMessageGenerationOptions,
+  proto,
 } from '@whiskeysockets/baileys'
 import { Boom } from '@hapi/boom'
 import path from 'path'
@@ -242,6 +243,13 @@ export class BaileysManager {
     })
 
     // ============================================
+    // EVENT: Contacts Upsert (armazena em memória)
+    // ============================================
+    sock.ev.on('contacts.upsert', async (contacts) => {
+      WebhookDispatcher.dispatch(instanceId, 'contacts', { event: 'contacts_upsert', count: contacts.length })
+    })
+
+    // ============================================
     // EVENT: Presence Update
     // ============================================
     sock.ev.on('presence.update', async (presence) => {
@@ -315,6 +323,161 @@ export class BaileysManager {
   }
 
   // ============================================
+  // DELETE MESSAGE
+  // ============================================
+  static async deleteMessage(
+    instanceId: string,
+    jid: string,
+    messageId: string,
+    forEveryone: boolean
+  ): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    const key: proto.IMessageKey = { remoteJid: jid, id: messageId, fromMe: true }
+    if (forEveryone) {
+      await inst.socket.sendMessage(jid, { delete: key })
+    } else {
+      await (inst.socket as any).chatModify({ clear: { messages: [{ id: messageId, fromMe: true, timestamp: 0 }] } }, jid)
+    }
+  }
+
+  // ============================================
+  // EDIT MESSAGE
+  // ============================================
+  static async editMessage(
+    instanceId: string,
+    jid: string,
+    messageId: string,
+    text: string
+  ): Promise<proto.IWebMessageInfo | undefined> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    return inst.socket.sendMessage(jid, {
+      text,
+      edit: { remoteJid: jid, id: messageId, fromMe: true },
+    } as any)
+  }
+
+  // ============================================
+  // READ MESSAGES
+  // ============================================
+  static async readMessages(
+    instanceId: string,
+    keys: { remoteJid: string; id: string; fromMe?: boolean }[]
+  ): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    await inst.socket.readMessages(keys.map(k => ({ ...k, participant: undefined })))
+  }
+
+  // ============================================
+  // SEND BUTTONS
+  // ============================================
+  static async sendButtons(
+    instanceId: string,
+    jid: string,
+    text: string,
+    footer: string,
+    buttons: { id: string; text: string }[]
+  ): Promise<proto.IWebMessageInfo | undefined> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    return inst.socket.sendMessage(jid, {
+      buttonsMessage: {
+        contentText: text,
+        footerText: footer,
+        buttons: buttons.map(b => ({
+          buttonId: b.id,
+          buttonText: { displayText: b.text },
+          type: 1,
+        })),
+        headerType: 1,
+      },
+    } as any)
+  }
+
+  // ============================================
+  // SEND LIST
+  // ============================================
+  static async sendList(
+    instanceId: string,
+    jid: string,
+    title: string,
+    text: string,
+    footer: string,
+    buttonText: string,
+    sections: { title: string; rows: { id: string; title: string; description?: string }[] }[]
+  ): Promise<proto.IWebMessageInfo | undefined> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    return inst.socket.sendMessage(jid, {
+      listMessage: {
+        title,
+        description: text,
+        footerText: footer,
+        buttonText,
+        listType: 1,
+        sections,
+      },
+    } as any)
+  }
+
+  // ============================================
+  // SEND POLL
+  // ============================================
+  static async sendPoll(
+    instanceId: string,
+    jid: string,
+    name: string,
+    values: string[],
+    selectableCount: number = 1
+  ): Promise<proto.IWebMessageInfo | undefined> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    return inst.socket.sendMessage(jid, {
+      poll: { name, values, selectableCount },
+    })
+  }
+
+  // ============================================
+  // SEND CAROUSEL (template buttons)
+  // ============================================
+  static async sendCarousel(
+    instanceId: string,
+    jid: string,
+    cards: {
+      title: string
+      body: string
+      footer?: string
+      image?: string
+      buttons: { id: string; text: string; url?: string }[]
+    }[]
+  ): Promise<proto.IWebMessageInfo | undefined> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+
+    const carouselCards = cards.map(card => ({
+      header: card.image
+        ? { imageMessage: { url: card.image }, hasMediaAttachment: true }
+        : undefined,
+      body: { text: `*${card.title}*\n${card.body}` },
+      footer: card.footer ? { text: card.footer } : undefined,
+      buttons: card.buttons.map(b => ({
+        buttonId: b.id,
+        buttonText: { displayText: b.text },
+        type: b.url ? 5 : 1,
+        ...(b.url ? { urlButton: { displayText: b.text, url: b.url } } : {}),
+      })),
+    }))
+
+    return inst.socket.sendMessage(jid, {
+      carouselMessage: {
+        cards: carouselCards,
+      },
+    } as any)
+  }
+
+  // ============================================
   // CHECK NUMBER ON WHATSAPP
   // ============================================
   static async checkNumber(instanceId: string, jid: string): Promise<boolean> {
@@ -343,6 +506,15 @@ export class BaileysManager {
   }
 
   // ============================================
+  // GET GROUP METADATA
+  // ============================================
+  static async getGroupMetadata(instanceId: string, groupId: string): Promise<any> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    return inst.socket.groupMetadata(groupId)
+  }
+
+  // ============================================
   // GET GROUP PARTICIPANTS
   // ============================================
   static async getGroupParticipants(instanceId: string, groupId: string): Promise<any[]> {
@@ -358,6 +530,77 @@ export class BaileysManager {
   }
 
   // ============================================
+  // CREATE GROUP
+  // ============================================
+  static async createGroup(
+    instanceId: string,
+    name: string,
+    participants: string[]
+  ): Promise<any> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    return inst.socket.groupCreate(name, participants)
+  }
+
+  // ============================================
+  // GET GROUP INVITE LINK
+  // ============================================
+  static async getGroupInviteLink(instanceId: string, groupId: string): Promise<string> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    const code = await inst.socket.groupInviteCode(groupId)
+    return code || ''
+  }
+
+  // ============================================
+  // UPDATE GROUP PARTICIPANTS
+  // ============================================
+  static async updateGroupParticipants(
+    instanceId: string,
+    groupId: string,
+    action: 'add' | 'remove' | 'promote' | 'demote',
+    participants: string[]
+  ): Promise<any> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    return inst.socket.groupParticipantsUpdate(groupId, participants, action)
+  }
+
+  // ============================================
+  // UPDATE GROUP SETTINGS
+  // ============================================
+  static async updateGroupSettings(
+    instanceId: string,
+    groupId: string,
+    settings: { announce?: boolean; restrict?: boolean; subject?: string; description?: string }
+  ): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+
+    if (settings.subject !== undefined) {
+      await inst.socket.groupUpdateSubject(groupId, settings.subject)
+    }
+    if (settings.description !== undefined) {
+      await inst.socket.groupUpdateDescription(groupId, settings.description)
+    }
+    if (settings.announce !== undefined) {
+      await inst.socket.groupSettingUpdate(groupId, settings.announce ? 'announcement' : 'not_announcement')
+    }
+    if (settings.restrict !== undefined) {
+      await inst.socket.groupSettingUpdate(groupId, settings.restrict ? 'locked' : 'unlocked')
+    }
+  }
+
+  // ============================================
+  // LEAVE GROUP
+  // ============================================
+  static async leaveGroup(instanceId: string, groupId: string): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    await inst.socket.groupLeave(groupId)
+  }
+
+  // ============================================
   // GET LABELS
   // ============================================
   static async getLabels(instanceId: string): Promise<any[]> {
@@ -369,6 +612,114 @@ export class BaileysManager {
     } catch {
       return []
     }
+  }
+
+  // ============================================
+  // MANAGE LABEL (add/remove to chat)
+  // ============================================
+  static async manageLabel(
+    instanceId: string,
+    jid: string,
+    labelId: string,
+    action: 'add' | 'remove'
+  ): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    await (inst.socket as any).addChatLabel?.(jid, labelId)
+  }
+
+  // ============================================
+  // GET PROFILE PICTURE
+  // ============================================
+  static async getProfilePicture(instanceId: string, jid: string): Promise<string | null> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    try {
+      return await inst.socket.profilePictureUrl(jid, 'image') || null
+    } catch {
+      return null
+    }
+  }
+
+  // ============================================
+  // UPDATE PROFILE PICTURE
+  // ============================================
+  static async updateProfilePicture(instanceId: string, imageBase64: string): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    const buffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
+    await inst.socket.updateProfilePicture(inst.socket.user!.id, buffer)
+  }
+
+  // ============================================
+  // UPDATE PROFILE STATUS (bio)
+  // ============================================
+  static async updateProfileStatus(instanceId: string, status: string): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    await inst.socket.updateProfileStatus(status)
+  }
+
+  // ============================================
+  // UPDATE PROFILE NAME
+  // ============================================
+  static async updateProfileName(instanceId: string, name: string): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    await inst.socket.updateProfileName(name)
+    // Sync name in DB
+    await query('UPDATE instances SET profile_name = $2, updated_at = NOW() WHERE id = $1', [instanceId, name])
+  }
+
+  // ============================================
+  // GET CONTACTS
+  // ============================================
+  static async getContacts(instanceId: string): Promise<any[]> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    try {
+      const store = (inst.socket as any).store
+      if (store?.contacts) {
+        return Object.values(store.contacts).map((c: any) => ({
+          id: c.id,
+          name: c.name || c.notify,
+          phone: c.id?.replace('@s.whatsapp.net', ''),
+        }))
+      }
+      return []
+    } catch {
+      return []
+    }
+  }
+
+  // ============================================
+  // GET BLOCKED CONTACTS
+  // ============================================
+  static async getBlockedContacts(instanceId: string): Promise<any[]> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    try {
+      const blocked = await inst.socket.fetchBlocklist()
+      return blocked.filter(Boolean).map((jid: string | undefined) => ({
+        jid: jid || '',
+        phone: (jid || '').replace('@s.whatsapp.net', ''),
+      }))
+    } catch {
+      return []
+    }
+  }
+
+  // ============================================
+  // BLOCK / UNBLOCK CONTACT
+  // ============================================
+  static async blockContact(
+    instanceId: string,
+    jid: string,
+    action: 'block' | 'unblock'
+  ): Promise<void> {
+    const inst = instances.get(instanceId)
+    if (!inst?.socket) throw new Error('Instance not connected')
+    await inst.socket.updateBlockStatus(jid, action)
   }
 
   // ============================================
@@ -429,6 +780,18 @@ export class BaileysManager {
   // ============================================
   static getSocket(instanceId: string): WASocket | undefined {
     return instances.get(instanceId)?.socket
+  }
+
+  // ============================================
+  // GET ALL INSTANCES (for server status)
+  // ============================================
+  static getAllInstances(): InstanceInfo[] {
+    return Array.from(instances.values()).map(i => ({
+      id: i.id,
+      name: i.name,
+      status: i.status,
+      retryCount: i.retryCount,
+    }))
   }
 
   // ============================================

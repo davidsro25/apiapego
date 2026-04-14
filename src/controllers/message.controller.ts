@@ -54,6 +54,70 @@ const reactionSchema = toBase.extend({
   emoji: z.string().min(1),
 })
 
+const buttonsSchema = toBase.extend({
+  text: z.string().min(1).max(1024),
+  footer: z.string().optional().default(''),
+  buttons: z.array(z.object({
+    id: z.string(),
+    text: z.string(),
+  })).min(1).max(3),
+})
+
+const listSchema = toBase.extend({
+  title: z.string().min(1),
+  text: z.string().min(1),
+  footer: z.string().optional().default(''),
+  buttonText: z.string().default('Ver opções'),
+  sections: z.array(z.object({
+    title: z.string(),
+    rows: z.array(z.object({
+      id: z.string(),
+      title: z.string(),
+      description: z.string().optional(),
+    })).min(1),
+  })).min(1),
+})
+
+const pollSchema = toBase.extend({
+  name: z.string().min(1).max(255),
+  values: z.array(z.string().min(1)).min(2).max(12),
+  selectableCount: z.number().min(0).max(12).optional().default(1),
+})
+
+const carouselSchema = toBase.extend({
+  cards: z.array(z.object({
+    title: z.string().min(1),
+    body: z.string().min(1),
+    footer: z.string().optional(),
+    image: z.string().optional(),
+    buttons: z.array(z.object({
+      id: z.string(),
+      text: z.string(),
+      url: z.string().optional(),
+    })).min(1).max(3),
+  })).min(1).max(10),
+})
+
+const deleteSchema = z.object({
+  to: z.string().min(8),
+  messageId: z.string().min(1),
+  forEveryone: z.boolean().optional().default(true),
+})
+
+const editSchema = z.object({
+  to: z.string().min(8),
+  messageId: z.string().min(1),
+  text: z.string().min(1).max(4096),
+})
+
+const readSchema = z.object({
+  keys: z.array(z.object({
+    remoteJid: z.string().min(1),
+    id: z.string().min(1),
+    fromMe: z.boolean().optional(),
+  })).min(1),
+})
+
 const checkSchema = z.object({
   phone: z.string().min(8),
 })
@@ -127,6 +191,55 @@ export const MessageController = {
     const { to, messageId, emoji } = reactionSchema.parse(request.body)
     const inst = await getInstance(request.params.id)
     const result = await MessageService.sendReaction(inst.id, to, messageId, emoji)
+    return reply.send(result)
+  },
+
+  async sendButtons(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { to, text, footer, buttons } = buttonsSchema.parse(request.body)
+    const inst = await getInstance(request.params.id)
+    const result = await MessageService.sendButtons(inst.id, to, text, footer, buttons)
+    return reply.send(result)
+  },
+
+  async sendList(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { to, title, text, footer, buttonText, sections } = listSchema.parse(request.body)
+    const inst = await getInstance(request.params.id)
+    const result = await MessageService.sendList(inst.id, to, title, text, footer, buttonText, sections)
+    return reply.send(result)
+  },
+
+  async sendPoll(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { to, name, values, selectableCount } = pollSchema.parse(request.body)
+    const inst = await getInstance(request.params.id)
+    const result = await MessageService.sendPoll(inst.id, to, name, values, selectableCount)
+    return reply.send(result)
+  },
+
+  async sendCarousel(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { to, cards } = carouselSchema.parse(request.body)
+    const inst = await getInstance(request.params.id)
+    const result = await MessageService.sendCarousel(inst.id, to, cards)
+    return reply.send(result)
+  },
+
+  async deleteMessage(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { to, messageId, forEveryone } = deleteSchema.parse(request.body)
+    const inst = await getInstance(request.params.id)
+    const result = await MessageService.deleteMessage(inst.id, to, messageId, forEveryone)
+    return reply.send(result)
+  },
+
+  async editMessage(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { to, messageId, text } = editSchema.parse(request.body)
+    const inst = await getInstance(request.params.id)
+    const result = await MessageService.editMessage(inst.id, to, messageId, text)
+    return reply.send(result)
+  },
+
+  async readMessages(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { keys } = readSchema.parse(request.body)
+    const inst = await getInstance(request.params.id)
+    const result = await MessageService.readMessages(inst.id, keys)
     return reply.send(result)
   },
 
