@@ -12,42 +12,40 @@ export interface SendResult {
 }
 
 export class MessageService {
-  private static async resolveJid(instanceId: string, phone: string): Promise<string> {
+  // Retorna o JID primario (com 9 para celulares BR de 8 digitos)
+  private static resolveJid(phone: string): string {
     if (phone.includes('@')) return phone
-
     if (!isValidPhone(phone)) throw new Error('Numero invalido: ' + phone)
+    return toJid(formatBrazilianPhone(phone))
+  }
 
-    const formatted = formatBrazilianPhone(phone)
-    const jid = toJid(formatted)
+  // Retorna o formato alternativo (sem 9 se tinha, com 9 se nao tinha)
+  private static altJid(jid: string): string | null {
+    const digits = jid.replace('@s.whatsapp.net', '')
+    if (!digits.startsWith('55') || digits.length < 12) return null
+    const ddd = digits.slice(2, 4)
+    const number = digits.slice(4)
+    if (number.length === 9 && number.startsWith('9')) {
+      return `55${ddd}${number.slice(1)}@s.whatsapp.net`
+    }
+    if (number.length === 8) {
+      return `55${ddd}9${number}@s.whatsapp.net`
+    }
+    return null
+  }
 
-    // Tenta verificar se o numero existe no WhatsApp
-    // Estrategia: tenta formato com 9 (novo padrao BR) e sem 9 (formato antigo BR)
+  // Tenta fn(jid); se falhar, tenta fn(altJid). Nunca envia para os dois.
+  private static async withFallback(
+    jid: string,
+    fn: (j: string) => Promise<proto.IWebMessageInfo | undefined>
+  ): Promise<proto.IWebMessageInfo | undefined> {
     try {
-      const exists = await BaileysManager.checkNumber(instanceId, jid)
-      if (exists) return jid
-
-      // Se nao encontrou no formato moderno, tenta o formato antigo (sem o 9 extra)
-      const digits = phone.replace(/\D/g, '')
-      const withCountry = digits.startsWith('55') ? digits : '55' + digits
-      if (withCountry.length === 13) {
-        // Remove o 9 extra: 55 + DDD(2) + 9 + 8 digitos -> 55 + DDD + 8 digitos
-        const jidOld = toJid('55' + withCountry.slice(2, 4) + withCountry.slice(5))
-        const existsOld = await BaileysManager.checkNumber(instanceId, jidOld)
-        if (existsOld) return jidOld
-      } else if (withCountry.length === 12) {
-        // Ja tentamos com 13 (com 9) acima, sem sucesso. Usa o 12 mesmo
-        const existsOld = await BaileysManager.checkNumber(instanceId, toJid(withCountry))
-        if (existsOld) return toJid(withCountry)
-      }
-
-      throw new Error('Numero ' + phone + ' nao esta no WhatsApp')
+      return await fn(jid)
     } catch (err: any) {
-      if (err.message?.includes('nao esta no WhatsApp') || err.message?.includes('not registered')) {
-        throw err
-      }
-      // Falha tecnica — ainda tenta enviar no formato moderno
-      logger.warn({ phone, jid, errMsg: err.message }, 'checkNumber falhou, tentando enviar mesmo assim')
-      return jid
+      const alt = this.altJid(jid)
+      if (!alt) throw err
+      logger.warn({ jid, alt, errMsg: err.message }, 'send falhou, tentando formato alternativo')
+      return await fn(alt)
     }
   }
 
@@ -69,8 +67,8 @@ export class MessageService {
   // TEXT
   // ============================================
   static async sendText(instanceId: string, phone: string, text: string, quoted?: string): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
-    const msg = await BaileysManager.sendMessage(instanceId, jid, { text })
+    const jid = this.resolveJid(phone)
+    const msg = await this.withFallback(jid, (j) => BaileysManager.sendMessage(instanceId, j, { text }))
     return this.buildResult(msg)
   }
 
@@ -83,14 +81,14 @@ export class MessageService {
     image: string,
     caption?: string
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
+    const jid = this.resolveJid(phone)
 
     const isBase64 = image.startsWith('data:') || !image.startsWith('http')
     const content: any = isBase64
       ? { image: Buffer.from(image.replace(/^data:image\/\w+;base64,/, ''), 'base64'), caption }
       : { image: { url: image }, caption }
 
-    const msg = await BaileysManager.sendMessage(instanceId, jid, content)
+    const msg = await this.withFallback(jid, (j) => BaileysManager.sendMessage(instanceId, j, content))
     return this.buildResult(msg)
   }
 
@@ -103,11 +101,11 @@ export class MessageService {
     video: string,
     caption?: string
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
-    const msg = await BaileysManager.sendMessage(instanceId, jid, {
+    const jid = this.resolveJid(phone)
+    const msg = await this.withFallback(jid, (j) => BaileysManager.sendMessage(instanceId, j, {
       video: { url: video },
       caption,
-    })
+    }))
     return this.buildResult(msg)
   }
 
@@ -120,12 +118,12 @@ export class MessageService {
     audio: string,
     ptt: boolean = false
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
-    const msg = await BaileysManager.sendMessage(instanceId, jid, {
+    const jid = this.resolveJid(phone)
+    const msg = await this.withFallback(jid, (j) => BaileysManager.sendMessage(instanceId, j, {
       audio: { url: audio },
       ptt,
       mimetype: 'audio/ogg; codecs=opus',
-    })
+    }))
     return this.buildResult(msg)
   }
 
@@ -139,12 +137,12 @@ export class MessageService {
     filename: string,
     mimetype?: string
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
-    const msg = await BaileysManager.sendMessage(instanceId, jid, {
+    const jid = this.resolveJid(phone)
+    const msg = await this.withFallback(jid, (j) => BaileysManager.sendMessage(instanceId, j, {
       document: { url },
       fileName: filename,
       mimetype: mimetype || 'application/octet-stream',
-    })
+    }))
     return this.buildResult(msg)
   }
 
@@ -158,10 +156,10 @@ export class MessageService {
     longitude: number,
     name?: string
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
-    const msg = await BaileysManager.sendMessage(instanceId, jid, {
+    const jid = this.resolveJid(phone)
+    const msg = await this.withFallback(jid, (j) => BaileysManager.sendMessage(instanceId, j, {
       location: { degreesLatitude: latitude, degreesLongitude: longitude, name },
-    })
+    }))
     return this.buildResult(msg)
   }
 
@@ -174,7 +172,7 @@ export class MessageService {
     contactName: string,
     contactPhone: string
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
+    const jid = this.resolveJid(phone)
     const vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${contactName}\nTEL;type=CELL;type=VOICE;waid=${contactPhone.replace(/\D/g, '')}:+${contactPhone.replace(/\D/g, '')}\nEND:VCARD`
 
     const msg = await BaileysManager.sendMessage(instanceId, jid, {
@@ -190,7 +188,7 @@ export class MessageService {
   // STICKER
   // ============================================
   static async sendSticker(instanceId: string, phone: string, stickerUrl: string): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
+    const jid = this.resolveJid(phone)
     const msg = await BaileysManager.sendMessage(instanceId, jid, {
       sticker: { url: stickerUrl },
     })
@@ -206,7 +204,7 @@ export class MessageService {
     messageId: string,
     emoji: string
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
+    const jid = this.resolveJid(phone)
     const msg = await BaileysManager.sendMessage(instanceId, jid, {
       react: { text: emoji, key: { remoteJid: jid, id: messageId } },
     })
@@ -223,7 +221,7 @@ export class MessageService {
     footer: string,
     buttons: { id: string; text: string }[]
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
+    const jid = this.resolveJid(phone)
     const msg = await BaileysManager.sendButtons(instanceId, jid, text, footer, buttons)
     return this.buildResult(msg)
   }
@@ -240,7 +238,7 @@ export class MessageService {
     buttonText: string,
     sections: { title: string; rows: { id: string; title: string; description?: string }[] }[]
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
+    const jid = this.resolveJid(phone)
     const msg = await BaileysManager.sendList(instanceId, jid, title, text, footer, buttonText, sections)
     return this.buildResult(msg)
   }
@@ -255,7 +253,7 @@ export class MessageService {
     values: string[],
     selectableCount?: number
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
+    const jid = this.resolveJid(phone)
     const msg = await BaileysManager.sendPoll(instanceId, jid, name, values, selectableCount)
     return this.buildResult(msg)
   }
@@ -274,7 +272,7 @@ export class MessageService {
       buttons: { id: string; text: string; url?: string }[]
     }[]
   ): Promise<SendResult> {
-    const jid = await this.resolveJid(instanceId, phone)
+    const jid = this.resolveJid(phone)
     const msg = await BaileysManager.sendCarousel(instanceId, jid, cards)
     return this.buildResult(msg)
   }
