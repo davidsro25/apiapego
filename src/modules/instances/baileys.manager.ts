@@ -25,6 +25,8 @@ export interface InstanceInfo {
   qr?: string
   socket?: WASocket
   retryCount: number
+  settings?: Record<string, any>
+  webhookConfig?: { url: string | null; enabled: boolean; events: string[]; active: boolean }
 }
 
 const instances = new Map<string, InstanceInfo>()
@@ -122,10 +124,28 @@ export class BaileysManager {
           [instanceId, phone, profileName]
         )
 
-        const instData = await queryOne<{ settings: Record<string, any> }>(
-          'SELECT settings FROM instances WHERE id = $1', [instanceId]
+        const instData = await queryOne<{
+          settings: Record<string, any>
+          webhook_url: string | null
+          webhook_enabled: boolean
+          webhook_events: string[]
+          subscription_active: boolean
+        }>(
+          'SELECT settings, webhook_url, webhook_enabled, webhook_events, subscription_active FROM instances WHERE id = $1', [instanceId]
         )
         const settings = instData?.settings || {}
+        // Cache settings and webhook config to avoid DB queries on every event
+        const currentInst = instances.get(instanceId)
+        if (currentInst) {
+          currentInst.settings = settings
+          currentInst.webhookConfig = {
+            url: instData?.webhook_url || null,
+            enabled: instData?.webhook_enabled !== false,
+            events: instData?.webhook_events || [],
+            active: instData?.subscription_active !== false,
+          }
+          instances.set(instanceId, currentInst)
+        }
         if (settings.alwaysOnline) {
           await sock.sendPresenceUpdate('available').catch(() => {})
         }
@@ -192,10 +212,8 @@ export class BaileysManager {
       }
       if (type !== 'notify') return
 
-      const instanceData = await queryOne<{ settings: Record<string, boolean> }>(
-        'SELECT settings FROM instances WHERE id = $1', [instanceId]
-      )
-      const settings = instanceData?.settings || {}
+      // Use cached settings to avoid DB query on every message event
+      const settings = (instances.get(instanceId)?.settings || {}) as Record<string, boolean>
 
       for (const msg of messages) {
         if (!msg.message) continue
@@ -291,10 +309,8 @@ export class BaileysManager {
     // EVENT: Calls
     // ============================================
     sock.ev.on('call', async (calls) => {
-      const instData = await queryOne<{ settings: Record<string, any> }>(
-        'SELECT settings FROM instances WHERE id = $1', [instanceId]
-      )
-      const settings = instData?.settings || {}
+      // Use cached settings to avoid DB query on every call event
+      const settings = instances.get(instanceId)?.settings || {}
 
       for (const call of calls) {
         if (settings.rejectCalls && call.status === 'offer') {

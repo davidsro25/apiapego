@@ -1,3 +1,4 @@
+import { WebhookDispatcher } from '../modules/webhook/webhook.dispatcher'
 import { v4 as uuidv4 } from 'uuid'
 import { query, queryOne } from '../database/db'
 import { cacheDel } from '../database/redis'
@@ -121,6 +122,8 @@ export class InstanceService {
        WHERE id::text = $1 RETURNING *`,
       [instance.id, url, enabled, events]
     )
+    // Invalidate webhook cache so next dispatch picks up new config
+    WebhookDispatcher.invalidateCache(instance.id)
     return updated
   }
 

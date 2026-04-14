@@ -3,12 +3,28 @@ import { queryOne } from '../../database/db'
 import { logger } from '../../utils/logger'
 import { config } from '../../config'
 
+interface WebhookConfig {
+  webhook_url: string | null
+  webhook_enabled: boolean
+  webhook_events: string[]
+  subscription_active: boolean
+  cachedAt: number
+}
+
+// In-memory cache: instanceId -> WebhookConfig (TTL 60s)
+const webhookCache = new Map<string, WebhookConfig>()
+const CACHE_TTL_MS = 60_000
+
 export class WebhookDispatcher {
-  static async dispatch(
-    instanceId: string,
-    eventType: string,
-    payload: any
-  ): Promise<void> {
+  static invalidateCache(instanceId: string) {
+    webhookCache.delete(instanceId)
+  }
+
+  private static async getConfig(instanceId: string): Promise<WebhookConfig | null> {
+    const cached = webhookCache.get(instanceId)
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+      return cached
+    }
     const instance = await queryOne<{
       webhook_url: string | null
       webhook_enabled: boolean
@@ -18,12 +34,29 @@ export class WebhookDispatcher {
       'SELECT webhook_url, webhook_enabled, webhook_events, subscription_active FROM instances WHERE id = $1',
       [instanceId]
     )
+    if (!instance) return null
+    const cfg: WebhookConfig = { ...instance, cachedAt: Date.now() }
+    webhookCache.set(instanceId, cfg)
+    return cfg
+  }
+
+  static async dispatch(
+    instanceId: string,
+    eventType: string,
+    payload: any
+  ): Promise<void> {
+    let instance: WebhookConfig | null
+    try {
+      instance = await this.getConfig(instanceId)
+    } catch (err: any) {
+      logger.warn({ instanceId, err: err.message }, 'WebhookDispatcher: failed to get config, skipping')
+      return
+    }
 
     if (!instance?.webhook_url) return
     if (instance.webhook_enabled === false) return
     if (instance.subscription_active === false) return
 
-    // Verifica se o evento está na lista ou se 'all' está habilitado
     const events = instance.webhook_events || []
     if (!events.includes('all') && !events.includes(eventType)) return
 
