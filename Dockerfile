@@ -31,7 +31,7 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini tzdata
 
 # Instala apenas prod deps
 COPY package*.json ./

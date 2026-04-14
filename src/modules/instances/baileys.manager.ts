@@ -194,6 +194,10 @@ export class BaileysManager {
     sock.ev.on('messages.update', async (updates) => {
       for (const update of updates) {
         const payload = { messageId: update.key.id, remoteJid: update.key.remoteJid, status: update.update.status }
+        // Status: 0=ERROR 1=PENDING 2=SERVER_ACK 3=DELIVERY_ACK 4=READ 5=PLAYED
+        const statusNames = ['ERROR','PENDING','SERVER_ACK','DELIVERY_ACK','READ','PLAYED']
+        const statusName = statusNames[update.update.status ?? -1] || ('UNKNOWN_' + update.update.status)
+        logger.info({ instance: instanceId, msgId: update.key.id, jid: update.key.remoteJid, status: statusName }, 'message status update')
         WebSocketServer.broadcast(instanceId, { event: 'message_status', data: payload })
         WebhookDispatcher.dispatch(instanceId, 'status', payload)
       }
