@@ -28,6 +28,8 @@ export interface InstanceInfo {
 }
 
 const instances = new Map<string, InstanceInfo>()
+// Message store per instance: key = instanceId, value = Map<msgId, WAMessage>
+const msgStores = new Map<string, Map<string, WAMessage>>()
 
 export class BaileysManager {
   private static sessionsDir = config.storage.sessionsPath
@@ -58,6 +60,11 @@ export class BaileysManager {
 
     logger.info({ instanceName, version }, 'Starting Baileys connection')
 
+    // Initialize per-instance message store (keeps last 500 messages for WhatsApp retry/delivery)
+    if (!msgStores.has(instanceId)) {
+      msgStores.set(instanceId, new Map<string, WAMessage>())
+    }
+
     const sock = makeWASocket({
       version,
       auth: state,
@@ -69,6 +76,12 @@ export class BaileysManager {
       keepAliveIntervalMs: 25000,
       markOnlineOnConnect: true,
       syncFullHistory: false,
+      getMessage: async (key) => {
+        const store = msgStores.get(instanceId)
+        const stored = store?.get(key.id ?? "")
+        if (stored?.message) return stored.message
+        return { conversation: "message not found" }
+      },
     })
 
     instances.set(instanceId, {
@@ -164,6 +177,19 @@ export class BaileysManager {
     // EVENT: Messages Received
     // ============================================
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
+      // Populate message store for getMessage (needed for WhatsApp message retry/delivery)
+      const msgStore = msgStores.get(instanceId)
+      if (msgStore) {
+        for (const msg of messages) {
+          if (msg.key.id) {
+            msgStore.set(msg.key.id, msg)
+            if (msgStore.size > 500) {
+              const firstKey = msgStore.keys().next().value
+              if (firstKey) msgStore.delete(firstKey)
+            }
+          }
+        }
+      }
       if (type !== 'notify') return
 
       const instanceData = await queryOne<{ settings: Record<string, boolean> }>(
@@ -323,7 +349,19 @@ export class BaileysManager {
     const inst = instances.get(instanceId)
     if (!inst?.socket) throw new Error('Instance not connected')
     if (inst.status !== 'connected') throw new Error(`Instance status: ${inst.status}`)
-    return inst.socket.sendMessage(jid, content, options)
+    const result = await inst.socket.sendMessage(jid, content, options)
+    // Store sent message for getMessage (WhatsApp retry/delivery mechanism)
+    if (result?.key?.id) {
+      const msgStore = msgStores.get(instanceId)
+      if (msgStore) {
+        msgStore.set(result.key.id, result as any)
+        if (msgStore.size > 500) {
+          const firstKey = msgStore.keys().next().value
+          if (firstKey) msgStore.delete(firstKey)
+        }
+      }
+    }
+    return result
   }
 
   // ============================================
