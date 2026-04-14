@@ -29,11 +29,25 @@ export function errorHandler(
     })
   }
 
-  // Erro interno - loga e retorna 500 genérico
+  // Erros de negocio conhecidos — retorna mensagem real
+  const knownErrors = [
+    'not connected', 'Instance status:', 'nao esta no WhatsApp', 'not registered',
+    'Numero invalido', 'Invalid phone', 'not found', 'Instance not found'
+  ]
+  const isKnownError = knownErrors.some(e => error.message?.toLowerCase().includes(e.toLowerCase()))
+
+  if (isKnownError) {
+    return reply.status(400).send({
+      error: 'Bad Request',
+      message: error.message,
+    })
+  }
+
+  // Erro interno — loga e retorna mensagem real (util para debug)
   logger.error({ err: error, url: request.url, method: request.method }, 'Internal server error')
 
   return reply.status(500).send({
     error: 'Internal Server Error',
-    message: 'An unexpected error occurred',
+    message: error.message || 'An unexpected error occurred',
   })
 }

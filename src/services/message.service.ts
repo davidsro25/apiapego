@@ -15,14 +15,21 @@ export class MessageService {
   private static async resolveJid(instanceId: string, phone: string): Promise<string> {
     if (phone.includes('@')) return phone
 
-    if (!isValidPhone(phone)) throw new Error('Invalid phone number')
+    if (!isValidPhone(phone)) throw new Error('Numero invalido: ' + phone)
 
     const formatted = formatBrazilianPhone(phone)
     const jid = toJid(formatted)
 
-    // Verifica se o número existe no WhatsApp
-    const exists = await BaileysManager.checkNumber(instanceId, jid)
-    if (!exists) throw new Error(`Number ${phone} is not registered on WhatsApp`)
+    // Tenta verificar se o numero existe — se falhar tecnicamente, envia mesmo assim
+    try {
+      const exists = await BaileysManager.checkNumber(instanceId, jid)
+      if (!exists) throw new Error('Numero ' + phone + ' nao esta no WhatsApp')
+    } catch (err: any) {
+      if (err.message?.includes('nao esta no WhatsApp') || err.message?.includes('not registered')) {
+        throw err
+      }
+      logger.warn({ phone, jid, errMsg: err.message }, 'checkNumber falhou, tentando enviar mesmo assim')
+    }
 
     return jid
   }
