@@ -33,6 +33,7 @@ services:
       - RATE_LIMIT_WINDOW=60000
       - META_VERIFY_TOKEN=${META_VERIFY_TOKEN:-apego_meta_verify}
       - META_APP_SECRET=${META_APP_SECRET:-}
+      - SOCKS5_PROXY_URL=${SOCKS5_PROXY_URL:-}
     volumes:
       - sessions_data:/app/sessions
     depends_on:

@@ -10,6 +10,7 @@ import makeWASocket, {
   proto,
 } from '@whiskeysockets/baileys'
 import { Boom } from '@hapi/boom'
+import { SocksProxyAgent } from 'socks-proxy-agent'
 import path from 'path'
 import fs from 'fs'
 import { logger } from '../../utils/logger'
@@ -67,6 +68,12 @@ export class BaileysManager {
       msgStores.set(instanceId, new Map<string, WAMessage>())
     }
 
+    const proxyUrl = process.env.SOCKS5_PROXY_URL
+    const agent = proxyUrl ? new SocksProxyAgent(proxyUrl) : undefined
+    if (agent) {
+      logger.info({ instanceName, proxy: proxyUrl }, 'Using SOCKS5 proxy for WhatsApp connection')
+    }
+
     const sock = makeWASocket({
       version,
       auth: state,
@@ -78,11 +85,12 @@ export class BaileysManager {
       keepAliveIntervalMs: 25000,
       markOnlineOnConnect: true,
       syncFullHistory: false,
+      agent,
       getMessage: async (key) => {
         const store = msgStores.get(instanceId)
         const stored = store?.get(key.id ?? "")
         if (stored?.message) return stored.message
-        return { conversation: "message not found" }
+        return undefined
       },
     })
 
